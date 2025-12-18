@@ -1,0 +1,5 @@
+example/*
+!example/main.go
+!example/README.md
+.DS_Store
+*.log
