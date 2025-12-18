@@ -3,10 +3,10 @@ name: Release
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - 'v*.*.*' # 当推送格式如 v1.0.0 的标签时触发
 
 permissions:
-  contents: write
+  contents: write # 必须赋予写入权限才能创建 Release
 
 jobs:
   Release:
@@ -15,36 +15,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0
+          fetch-depth: 0 # 获取完整历史，以便对比标签差异
 
+      # 1. 提取版本号（去掉 refs/tags/ 前缀，只保留 v1.0.0）
       - name: Get Version
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: 3.0.6
-
-      - name: Install github-changelog-generator
-        run: gem install github_changelog_generator
-
-      - name: Generate Changelog
-        id: generate_changelog
-        run: |
-          github_changelog_generator \
-            --user wsshow \
-            --project op \
-            --output CHANGELOG.md \
-            --token ${{ secrets.GITHUB_TOKEN }}
-          
-          echo "content=$(cat CHANGELOG.md | head -n 50)" >> $GITHUB_OUTPUT
-
+      # 2. 创建 Release 并自动生成提交日志说明
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.get_version.outputs.VERSION }}
           name: ${{ steps.get_version.outputs.VERSION }}
-          body_path: CHANGELOG.md
+          generate_release_notes: true 
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
