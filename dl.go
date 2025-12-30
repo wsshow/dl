@@ -115,8 +115,10 @@ func (sw *selfWriter) calcRate(ctx context.Context) {
 
 // Options 下载器配置选项
 type Options struct {
-	// FileName 指定下载后保存的文件名（包含路径）
+	// FileName 指定下载后保存的文件名（不包含路径）
 	FileName string
+	// FilePath 指定下载后保存的完整路径（包含目录和文件名）
+	FilePath string
 	// BaseDir 多协程下载时分片文件的缓存目录
 	BaseDir string
 	// Concurrency 并发下载的协程数，0表示使用CPU核心数
@@ -128,10 +130,12 @@ type Options struct {
 // OptionFunc 配置函数
 type OptionFunc func(*Options)
 
-// WithFileName 设置下载的文件名
-func WithFileName(filename string) OptionFunc {
+// WithFileName 设置下载的文件名或路径
+// 如果 path 包含路径分隔符，将同时设置 FilePath 和 FileName
+func WithFileName(path string) OptionFunc {
 	return func(o *Options) {
-		o.FileName = filename
+		o.FilePath = path
+		o.FileName = filepath.Base(path)
 	}
 }
 
@@ -188,10 +192,12 @@ type Downloader struct {
 //	    WithConcurrency(8),
 //	    WithResume(true))
 func NewDownloader(url string, opts ...OptionFunc) *Downloader {
+	filename := filepath.Base(url)
 	options := &Options{
 		Concurrency: runtime.NumCPU(),
 		BaseDir:     DefaultBaseDir,
-		FileName:    filepath.Base(url),
+		FileName:    filename,
+		FilePath:    filename,
 		Resume:      true,
 	}
 
@@ -368,7 +374,7 @@ func (d *Downloader) multiDownload(contentLen int64) (err error) {
 		return fmt.Errorf("invalid content length: %d", contentLen)
 	}
 
-	filename := d.options.FileName
+	filename := d.options.FilePath
 
 	d.sw.mu.Lock()
 	d.sw.total = contentLen
@@ -379,7 +385,7 @@ func (d *Downloader) multiDownload(contentLen int64) (err error) {
 	}
 
 	partSize := contentLen / int64(d.concurrency)
-	partDir := d.getPartDir(filename)
+	partDir := d.getPartDir(d.options.FileName)
 	if err = os.MkdirAll(partDir, DirPerm); err != nil {
 		return fmt.Errorf("failed to create cache directory: %w", err)
 	}
@@ -516,7 +522,12 @@ func (d *Downloader) downloadPartial(rangeStart, rangeEnd int64, i int) error {
 
 // merge 合并所有分片文件为最终文件
 func (d *Downloader) merge() error {
-	filename := d.options.FileName
+	filename := d.options.FilePath
+
+	// 确保目标目录存在
+	if err := os.MkdirAll(filepath.Dir(filename), DirPerm); err != nil {
+		return fmt.Errorf("failed to create destination directory: %w", err)
+	}
 
 	// 创建目标文件
 	destFile, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, FilePerm)
@@ -527,7 +538,7 @@ func (d *Downloader) merge() error {
 
 	// 按顺序合并所有分片
 	for i := 0; i < d.concurrency; i++ {
-		partFileName := d.getPartFilename(filename, i)
+		partFileName := d.getPartFilename(d.options.FileName, i)
 
 		partFile, err := os.Open(partFileName)
 		if err != nil {
@@ -564,7 +575,7 @@ func (d *Downloader) getPartFilename(filename string, partNum int) string {
 // singleDownload 使用单线程下载文件（当服务器不支持Range请求时）
 func (d *Downloader) singleDownload() error {
 	url := d.url
-	filename := d.options.FileName
+	filename := d.options.FilePath
 
 	// 创建可取消的上下文
 	ctx, cancel := context.WithCancel(context.Background())
@@ -594,6 +605,11 @@ func (d *Downloader) singleDownload() error {
 
 	if d.onDownloadStart != nil {
 		d.onDownloadStart(contentLen, filename)
+	}
+
+	// 确保目标目录存在
+	if err := os.MkdirAll(filepath.Dir(filename), DirPerm); err != nil {
+		return fmt.Errorf("failed to create destination directory: %w", err)
 	}
 
 	// 创建目标文件

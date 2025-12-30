@@ -507,7 +507,7 @@ func TestOptionsValidation(t *testing.T) {
 			name: "WithFileName",
 			opts: []OptionFunc{WithFileName("custom.txt")},
 			want: func(d *Downloader) bool {
-				return d.options.FileName == "custom.txt"
+				return d.options.FileName == "custom.txt" && d.options.FilePath == "custom.txt"
 			},
 		},
 		{
