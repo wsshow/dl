@@ -452,10 +452,8 @@ func (d *Downloader) multiDownload(contentLen int64) (err error) {
 	}
 
 	// 删除临时目录
-	if err = os.RemoveAll(partDir); err != nil {
-		// 合并成功但清理失败，不应该返回错误
-		// 只记录错误但继续执行
-	}
+	_ = os.RemoveAll(partDir)
+	_ = removeIfEmpty(d.options.BaseDir)
 
 	if d.onDownloadFinished != nil {
 		d.onDownloadFinished(filename)
@@ -639,5 +637,33 @@ func (d *Downloader) singleDownload() error {
 		}
 	}
 
+	return nil
+}
+
+// removeIfEmpty 判断文件夹是否为空，如果是则删除
+func removeIfEmpty(dirPath string) error {
+	// 1. 打开目录
+	f, err := os.Open(dirPath)
+	if err != nil {
+		return fmt.Errorf("fail to open directory: %v", err)
+	}
+	defer f.Close()
+
+	// 2. 读取目录内容
+	// Readdirnames(1) 表示只读取 1 个条目。
+	// 如果返回 io.EOF，说明目录下没有任何文件或子目录。
+	_, err = f.Readdirnames(1)
+	if err == io.EOF {
+		// 目录为空，执行删除
+		// 必须先关闭文件句柄才能删除（尤其是 Windows 系统）
+		f.Close()
+		return os.Remove(dirPath)
+	}
+
+	if err != nil {
+		return fmt.Errorf("fail to read directory: %v", err)
+	}
+
+	// 3. 如果能读到内容，说明文件夹不为空
 	return nil
 }
