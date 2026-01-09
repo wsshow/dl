@@ -12,6 +12,7 @@
 - 📦 **断点续传** - 下载中断后可从上次位置继续
 - 📊 **实时进度** - 精确显示下载进度和速率（保留两位小数）
 - 🎯 **灵活配置** - 通过函数式选项轻松配置下载行为
+- 🌐 **代理支持** - 支持 HTTP、HTTPS、SOCKS5 代理和系统代理
 - 🛡️ **线程安全** - 使用原子操作和互斥锁保证并发安全
 - 🎮 **控制操作** - 支持开始、暂停、恢复、停止等操作
 - 📝 **事件回调** - 提供下载开始、进度更新、完成和取消等回调
@@ -75,6 +76,7 @@ func main() {
 		dl.WithConcurrency(8),                  // 8个并发协程
 		dl.WithBaseDir("./downloads/cache"),    // 自定义缓存目录
 		dl.WithResume(true),                    // 启用断点续传
+		dl.WithProxy("http://127.0.0.1:7890"), // 使用HTTP代理
 	)
 	
 	// 设置下载开始回调
@@ -187,6 +189,71 @@ func main() {
 }
 ```
 
+### 代理配置
+
+```go
+package main
+
+import (
+	"fmt"
+	"github.com/wsshow/dl"
+)
+
+func main() {
+	url := "https://example.com/file.zip"
+	
+	// 示例1: 使用 HTTP 代理
+	downloader1 := dl.NewDownloader(url,
+		dl.WithProxy("http://127.0.0.1:7890"),
+		dl.WithFileName("file1.zip"),
+	)
+	
+	// 示例2: 使用 SOCKS5 代理
+	downloader2 := dl.NewDownloader(url,
+		dl.WithProxy("socks5://127.0.0.1:1080"),
+		dl.WithFileName("file2.zip"),
+	)
+	
+	// 示例3: 使用系统代理（自动读取环境变量）
+	downloader3 := dl.NewDownloader(url,
+		dl.WithSystemProxy(),
+		dl.WithFileName("file3.zip"),
+	)
+	
+	// 示例4: 使用带认证的代理
+	downloader4 := dl.NewDownloader(url,
+		dl.WithProxy("http://username:password@proxy.example.com:8080"),
+		dl.WithFileName("file4.zip"),
+	)
+	
+	// 示例5: 自定义 HTTP 客户端（高级用法）
+	customClient := &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 10,
+			IdleConnTimeout:     90 * time.Second,
+		},
+	}
+	downloader5 := dl.NewDownloader(url,
+		dl.WithHTTPClient(customClient),
+		dl.WithFileName("file5.zip"),
+	)
+	
+	// 开始下载
+	if err := downloader1.Start(); err != nil {
+		fmt.Printf("下载失败: %v\n", err)
+	}
+}
+```
+
+**代理配置说明:**
+
+- **HTTP/HTTPS 代理**: `WithProxy("http://proxy.com:8080")`
+- **SOCKS5 代理**: `WithProxy("socks5://127.0.0.1:1080")`
+- **系统代理**: `WithSystemProxy()` - 自动读取 `HTTP_PROXY`、`HTTPS_PROXY` 和 `NO_PROXY` 环境变量
+- **代理认证**: 在 URL 中包含用户名和密码，如 `http://user:pass@proxy.com:8080`
+
 ## 📖 API 文档
 
 ### 创建下载器
@@ -218,6 +285,15 @@ func WithConcurrency(concurrency int) OptionFunc
 
 // 设置是否启用断点续传
 func WithResume(resume bool) OptionFunc
+
+// 设置自定义HTTP客户端
+func WithHTTPClient(client *http.Client) OptionFunc
+
+// 设置代理服务器（支持 HTTP、HTTPS、SOCKS5）
+func WithProxy(proxyURL string) OptionFunc
+
+// 使用系统代理设置（读取环境变量）
+func WithSystemProxy() OptionFunc
 ```
 
 ### 控制方法
@@ -258,10 +334,11 @@ func (d *Downloader) OnDownloadCanceled(f func(filename string))
 
 ```go
 type Options struct {
-    FileName    string  // 下载后保存的文件名（包含路径）
-    BaseDir     string  // 多协程下载时分片文件的缓存目录
-    Concurrency int     // 并发下载的协程数，0表示使用CPU核心数
-    Resume      bool    // 是否启用断点续传功能
+    FileName    string       // 下载后保存的文件名（包含路径）
+    BaseDir     string       // 多协程下载时分片文件的缓存目录
+    Concurrency int          // 并发下载的协程数，0表示使用CPU核心数
+    Resume      bool         // 是否启用断点续传功能
+    HTTPClient  *http.Client // 自定义HTTP客户端，可用于配置代理、超时等
 }
 ```
 
@@ -303,7 +380,3 @@ type Options struct {
 ## 📄 许可证
 
 本项目采用 MIT 许可证。详见 [LICENSE](LICENSE) 文件。
-
-## 🙏 致谢
-
-感谢所有为这个项目做出贡献的开发者！
