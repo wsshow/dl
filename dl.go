@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -125,6 +126,8 @@ type Options struct {
 	Concurrency int
 	// Resume 是否启用断点续传功能
 	Resume bool
+	// HTTPClient 自定义HTTP客户端，可用于配置代理、超时等
+	HTTPClient *http.Client
 }
 
 // OptionFunc 配置函数
@@ -160,6 +163,47 @@ func WithResume(resume bool) OptionFunc {
 	}
 }
 
+// WithHTTPClient 设置自定义的HTTP客户端
+// 可用于配置超时、重试策略、TLS配置等
+func WithHTTPClient(client *http.Client) OptionFunc {
+	return func(o *Options) {
+		o.HTTPClient = client
+	}
+}
+
+// WithProxy 设置代理服务器
+// proxyURL 代理服务器地址，例如："http://127.0.0.1:7890" 或 "socks5://127.0.0.1:1080"
+func WithProxy(proxyURL string) OptionFunc {
+	return func(o *Options) {
+		if proxyURL == "" {
+			return
+		}
+		proxyURLParsed, err := url.Parse(proxyURL)
+		if err != nil {
+			return
+		}
+		transport := &http.Transport{
+			Proxy: http.ProxyURL(proxyURLParsed),
+		}
+		o.HTTPClient = &http.Client{
+			Transport: transport,
+		}
+	}
+}
+
+// WithSystemProxy 使用系统代理设置
+// 会自动读取系统的 HTTP_PROXY、HTTPS_PROXY 和 NO_PROXY 环境变量
+func WithSystemProxy() OptionFunc {
+	return func(o *Options) {
+		transport := &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+		}
+		o.HTTPClient = &http.Client{
+			Transport: transport,
+		}
+	}
+}
+
 // Downloader 文件下载器，支持多协程并发下载和断点续传
 type Downloader struct {
 	url                string              // 下载URL
@@ -168,6 +212,7 @@ type Downloader struct {
 	partDir            string              // 分片文件目录
 	sw                 *selfWriter         // 进度跟踪器
 	options            *Options            // 配置选项
+	httpClient         *http.Client        // HTTP客户端
 	stopSignal         chan struct{}       // 停止信号
 	mCancelFunc        sync.Map            // 取消函数映射表 map[string]context.CancelFunc
 	onDownloadStart    func(int64, string) // 下载开始回调
@@ -213,11 +258,18 @@ func NewDownloader(url string, opts ...OptionFunc) *Downloader {
 	sw := &selfWriter{}
 	sw.rate.Store("0.00 MB/s")
 
+	// 设置HTTP客户端，如果未指定则使用默认客户端
+	httpClient := options.HTTPClient
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+
 	return &Downloader{
 		url:         url,
 		concurrency: options.Concurrency,
 		resume:      options.Resume,
 		options:     options,
+		httpClient:  httpClient,
 		sw:          sw,
 		stopSignal:  make(chan struct{}),
 		mCancelFunc: sync.Map{},
@@ -349,7 +401,7 @@ func (d *Downloader) download() error {
 	}
 
 	// 发送HEAD请求检查服务器是否支持Range请求
-	resp, err := http.Head(d.url)
+	resp, err := d.httpClient.Head(d.url)
 	if err != nil {
 		return fmt.Errorf("failed to get file info: %w", err)
 	}
@@ -486,7 +538,7 @@ func (d *Downloader) downloadPartial(rangeStart, rangeEnd int64, i int) error {
 
 	// 注意：Range的end是inclusive的，所以需要减1
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", rangeStart, rangeEnd-1))
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := d.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to download part %d: %w", i, err)
 	}
@@ -586,7 +638,7 @@ func (d *Downloader) singleDownload() error {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := d.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to download file: %w", err)
 	}
